@@ -3,23 +3,33 @@ package com.skyproton.dex_backend.service;
 import java.math.BigInteger;
 
 public interface SwapService {
-    String uniswapSwapExactInputSingle(
+    String buildApproveTx(
             int chainId,
-            String privateKey,
-            String tokenIn,
-            String tokenOut,
-            int fee,
-            BigInteger amountIn,
-            BigInteger amountOutMin
+            String tokenAddress,
+            String ownerAddress,
+            String spender,
+            BigInteger amount,
+            BigInteger gasLimit,
+            BigInteger gasPrice,
+            BigInteger maxFeePerGas,
+            BigInteger maxPriorityFeePerGas,
+            boolean eip1559
     ) throws Exception;
 
-    String curveSwapExactInputSingle(
+    String buildUniswapV3SwapExactInputSingleTx(
             int chainId,
-            String privateKey,
+            String walletAddress,
             String tokenIn,
             String tokenOut,
             int fee,
             BigInteger amountIn,
-            BigInteger amountOutMin
+            BigInteger amountOutMin,
+            BigInteger gasLimit,
+            BigInteger gasPrice,
+            BigInteger maxFeePerGas,
+            BigInteger maxPriorityFeePerGas,
+            boolean eip1559
     ) throws Exception;
+
+    String sendSignedTransaction(String signedTxHex, int chainId) throws Exception;
 }

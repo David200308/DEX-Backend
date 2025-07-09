@@ -2,8 +2,6 @@ package com.skyproton.dex_backend.service.impl;
 
 import com.skyproton.dex_backend.service.SwapService;
 import com.skyproton.dex_backend.tools.Blockchain;
-import com.skyproton.dex_backend.tools.Token;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.web3j.abi.FunctionEncoder;
 import org.web3j.abi.TypeReference;
@@ -24,14 +22,9 @@ import java.util.Collections;
 public class SwapServiceImpl implements SwapService {
 
     private final Blockchain blockchain;
-    private final Token token;
 
-    private final BigInteger GAS_LIMIT = BigInteger.valueOf(800000);
-    private final BigInteger GAS_PRICE = BigInteger.valueOf(30_000_000_000L); // 30 Gwei
-
-    public SwapServiceImpl(Blockchain blockchain, Token token) {
+    public SwapServiceImpl(Blockchain blockchain) {
         this.blockchain = blockchain;
-        this.token = token;
     }
 
     public static class ExactInputSingleParams extends DynamicStruct {
@@ -52,26 +45,74 @@ public class SwapServiceImpl implements SwapService {
         }
     }
 
-    @Override
-    public String uniswapSwapExactInputSingle(
+    public String buildApproveTx(
             int chainId,
-            String privateKey,
+            String tokenAddress,
+            String ownerAddress,
+            String spender,
+            BigInteger amount,
+            BigInteger gasLimit,
+            BigInteger gasPrice,
+            BigInteger maxFeePerGas,
+            BigInteger maxPriorityFeePerGas,
+            boolean eip1559
+    ) throws Exception {
+        Web3j web3j = blockchain.getWeb3Provider(chainId);
+
+        Function function = new Function(
+                "approve",
+                Arrays.asList(new Address(spender), new Uint256(amount)),
+                Collections.singletonList(new TypeReference<Bool>() {})
+        );
+
+        String encodedFunction = FunctionEncoder.encode(function);
+        EthGetTransactionCount txCount = web3j.ethGetTransactionCount(ownerAddress, DefaultBlockParameterName.LATEST).send();
+        BigInteger nonce = txCount.getTransactionCount();
+
+        RawTransaction rawTx;
+        if (eip1559) {
+            rawTx = RawTransaction.createTransaction(
+                    chainId,                      // long chainId
+                    nonce,                        // BigInteger nonce
+                    gasLimit,                     // BigInteger gasLimit
+                    tokenAddress,                 // String to
+                    BigInteger.ZERO,              // BigInteger value
+                    encodedFunction,              // String data
+                    maxPriorityFeePerGas,         // BigInteger maxPriorityFeePerGas
+                    maxFeePerGas                  // BigInteger maxFeePerGas
+            );
+        } else {
+            rawTx = RawTransaction.createTransaction(
+                    nonce,                        // BigInteger nonce
+                    gasPrice,                     // BigInteger gasPrice
+                    gasLimit,                     // BigInteger gasLimit
+                    tokenAddress,                 // String to
+                    BigInteger.ZERO,              // BigInteger value
+                    encodedFunction               // String data
+            );
+        }
+
+        return Numeric.toHexString(TransactionEncoder.encode(rawTx, chainId));
+    }
+
+    @Override
+    public String buildUniswapV3SwapExactInputSingleTx(
+            int chainId,
+            String walletAddress,
             String tokenIn,
             String tokenOut,
             int fee,
             BigInteger amountIn,
-            BigInteger amountOutMin
+            BigInteger amountOutMin,
+            BigInteger gasLimit,
+            BigInteger gasPrice,
+            BigInteger maxFeePerGas,
+            BigInteger maxPriorityFeePerGas,
+            boolean eip1559
     ) throws Exception {
         Web3j web3j = blockchain.getWeb3Provider(chainId);
-        Credentials credentials = Credentials.create(privateKey);
-        String walletAddress = credentials.getAddress();
 
-        // UniSwap V3 Swap Router ETH Mainnet
         String UNISWAP_V3_ROUTER = "0xE592427A0AEce92De3Edee1F18E0157C05861564";
-
-        // Approve token for swap router
-        String approveTxHash = token.approveToken(tokenIn, walletAddress, UNISWAP_V3_ROUTER, amountIn, web3j, credentials);
-        System.out.println("Approve tx hash: " + approveTxHash);
 
         BigInteger deadline = BigInteger.valueOf(Instant.now().getEpochSecond() + 1800); // 30 min
         BigInteger sqrtPriceLimitX96 = BigInteger.ZERO; // No limit
@@ -91,29 +132,39 @@ public class SwapServiceImpl implements SwapService {
         EthGetTransactionCount txCount = web3j.ethGetTransactionCount(walletAddress, DefaultBlockParameterName.LATEST).send();
         BigInteger nonce = txCount.getTransactionCount();
 
-        RawTransaction rawTx = RawTransaction.createTransaction(
-                nonce, GAS_PRICE, GAS_LIMIT, UNISWAP_V3_ROUTER, BigInteger.ZERO, encodedFunction
-        );
+        RawTransaction rawTx;
+        if (eip1559) {
+            rawTx = RawTransaction.createTransaction(
+                    chainId,                      // long chainId
+                    nonce,                        // BigInteger nonce
+                    gasLimit,                     // BigInteger gasLimit
+                    UNISWAP_V3_ROUTER,            // String to
+                    BigInteger.ZERO,              // BigInteger value
+                    encodedFunction,              // String data
+                    maxPriorityFeePerGas,         // BigInteger maxPriorityFeePerGas
+                    maxFeePerGas                  // BigInteger maxFeePerGas
+            );
+        } else {
+            rawTx = RawTransaction.createTransaction(
+                    nonce,                        // BigInteger nonce
+                    gasPrice,                     // BigInteger gasPrice
+                    gasLimit,                     // BigInteger gasLimit
+                    UNISWAP_V3_ROUTER,            // String to
+                    BigInteger.ZERO,              // BigInteger value
+                    encodedFunction               // String data
+            );
+        }
 
-        byte[] signedTx = TransactionEncoder.signMessage(rawTx, chainId, credentials);
-        String hexTx = Numeric.toHexString(signedTx);
-
-        EthSendTransaction result = web3j.ethSendRawTransaction(hexTx).send();
-        if (result.hasError()) throw new RuntimeException("Swap failed: " + result.getError().getMessage());
-
-        return result.getTransactionHash();
+        return Numeric.toHexString(TransactionEncoder.encode(rawTx, chainId));
     }
 
     @Override
-    public String curveSwapExactInputSingle(
-            int chainId,
-            String privateKey,
-            String tokenIn,
-            String tokenOut,
-            int fee,
-            BigInteger amountIn,
-            BigInteger amountOutMin
-    ) throws Exception {
-        return "";
+    public String sendSignedTransaction(String signedTx, int chainId) throws Exception {
+        Web3j web3j = blockchain.getWeb3Provider(chainId);
+        EthSendTransaction result = web3j.ethSendRawTransaction(signedTx).send();
+        if (result.hasError()) {
+            throw new RuntimeException("Transaction failed: " + result.getError().getMessage());
+        }
+        return result.getTransactionHash();
     }
 }
