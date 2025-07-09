@@ -1,0 +1,8 @@
+spring.application.name=dex-backend
+spring.datasource.url=jdbc:mysql://localhost:3306/dex
+spring.datasource.username=root
+spring.datasource.password=
+spring.jpa.hibernate.ddl-auto=update
+app.security.key=
+app.security.jwtkey=
+app.security.infuraApiKey=
